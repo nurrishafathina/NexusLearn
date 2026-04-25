@@ -1,0 +1,621 @@
+---
+title: "NexusLearn"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: scroll
+    theme: united
+    ##"cerulean", "journal", "flatly", "darkly", "readable", "spacelab", "united", "cosmo", "lumen", "paper", "sandstone", "simplex", "yeti"#
+---
+
+```{r setup, include=FALSE}
+# --- 0. LOAD LIBRARIES ---
+library(flexdashboard)
+library(igraph)
+library(dplyr) 
+library(DT)    
+
+# --- 1. DATA LOADING AND PREPARATION ---
+# Make sure this file is in the same directory as your .Rmd file
+table <- read.csv("SOCIAL NETWORK ANALYSIS QUESTIONNAIRE.csv", header = T, as.is = T)
+
+# Create a master list of all unique student names
+all_students <- unique(c(table$Full.Name,
+                         table$Friend.1, table$Friend.2, table$Friend.3,
+                         table$Friend.4, table$Friend.5, table$Friend.6,
+                         table$Friend.7, table$Friend.8, table$Friend.9,
+                         table$Friend.10, table$Tutor.1, table$Tutor.2,
+                         table$Tutor.3, table$Tutor.4, table$Tutor.5,
+                         table$Tutor.6, table$Tutor.7, table$Tutor.8,
+                         table$Tutor.9, table$Tutor.10))
+all_students <- all_students[all_students != "NO FRIENDS"]
+
+# --- THIS IS THE NEW, CORRECTED STUDENT DATA FRAME ---
+# 1. Create a data frame of all unique names
+student_names <- data.frame(Name = all_students)
+# 2. Create a lookup table for ID/Gender from the original CSV
+id_lookup <- table %>% select(ID, Full.Name, Gender)
+# 3. Merge them to create a correct master list
+student <- student_names %>%
+  left_join(id_lookup, by = c("Name" = "Full.Name"))
+
+
+# --- 2. FRIENDSHIP NETWORK (g) SETUP ---
+friendship <- data.frame(
+  From = rep(table$Full.Name, 10), 
+  To = c(table$Friend.1, table$Friend.2, table$Friend.3, table$Friend.4, table$Friend.5,
+         table$Friend.6, table$Friend.7, table$Friend.8, table$Friend.9, table$Friend.10)
+)
+friendship <- friendship[friendship$To != "NO FRIENDS", ]
+# Convert names to *row numbers* from the 'student' data frame
+friendship_numbered <- data.frame(
+  From_ID = match(friendship$From, student$Name),
+  To_ID = match(friendship$To, student$Name)
+)
+g <- graph_from_data_frame(d = friendship_numbered, directed = T)
+
+# Attributes
+ordered_ids_g <- as.numeric(V(g)$name)
+namesf <- student$Name[ordered_ids_g]
+genderf <- student$Gender[match(namesf, student$Name)] # Get gender from correct 'student' df
+gshapef <- ifelse(genderf == "Male (M)", "circle", "square")
+gcolorsf <- ifelse(genderf == "Male (M)", "#A2D2FF", "pink")
+
+# Create fixed custom labels 
+ordered_full_names_g <- student$Name[as.numeric(V(g)$name)]
+middle_names_g <- sapply(strsplit(trimws(ordered_full_names_g), " "), `[`, 2) 
+duplicated_middle_names_g <- names(which(table(middle_names_g) > 1))
+final_labels_g <- sapply(ordered_full_names_g, function(name) {
+  words <- strsplit(trimws(name), " ")[[1]] 
+  middle_name <- words[2]
+  if (is.na(middle_name)) return(name) # Handle NA names
+  if (middle_name %in% duplicated_middle_names_g) {
+    first_name <- words[1]
+    middle_initial <- substr(middle_name, 1, 1)
+    return(paste(first_name, " ", middle_initial, ".", sep = ""))
+  } else {
+    return(middle_name)
+  }
+})
+
+# Centrality
+degree_g <- degree(g, mode = "all")
+indegree_g <- degree(g, mode = "in")
+outdegree_g <- degree(g, mode = "out")
+betweenness_g <- betweenness(g, directed = F, weights = NA, normalized = TRUE)
+closeness_g <- closeness(g, mode = "all", weights = NA)
+ids_g <- student$ID[match(namesf, student$Name)] # Get ID from correct 'student' df
+centrality_table_g <- data.frame(
+  ID = ids_g, Name = namesf, Degree = degree_g, Indegree = indegree_g,
+  Outdegree = outdegree_g, Betweenness = betweenness_g, Closeness = closeness_g
+)
+
+# --- 3. PEER-TUTORING NETWORK (v) SETUP ---
+tutor <- data.frame(
+  From = rep(table$Full.Name, 10),
+  To = c(table$Tutor.1, table$Tutor.2, table$Tutor.3, table$Tutor.4, table$Tutor.5,
+         table$Tutor.6, table$Tutor.7, table$Tutor.8, table$Tutor.9, table$Tutor.10)
+)
+tutor <- tutor[tutor$To != "NO FRIENDS", ]
+# Convert names to *row numbers* from the 'student' data frame
+tutor_numbered <- data.frame(
+  From_ID = match(tutor$From, student$Name),
+  To_ID = match(tutor$To, student$Name)
+)
+v <- graph_from_data_frame(d = tutor_numbered, directed = T)
+
+# --- THIS IS THE SECOND FIX ---
+# Attributes (Using V(v) instead of V(g))
+ordered_ids_v <- as.numeric(V(v)$name) # <-- MUST BE V(v)
+namest <- student$Name[ordered_ids_v]
+gendert <- student$Gender[match(namest, student$Name)] # Get gender from correct 'student' df
+gshapet <- ifelse(gendert == "Male (M)", "circle", "square")
+gcolorst <- ifelse(gendert == "Male (M)", "#FAFAD2", "#E0BBE4")
+
+# Create fixed custom labels 
+ordered_full_namest <- student$Name[as.numeric(V(v)$name)] # <-- MUST BE V(v)
+middle_namest <- sapply(strsplit(trimws(ordered_full_namest), " "), `[`, 2) 
+duplicated_middle_namest <- names(which(table(middle_namest) > 1))
+final_labelst <- sapply(ordered_full_namest, function(name) {
+  words <- strsplit(trimws(name), " ")[[1]] 
+  middle_name <- words[2]
+  if (is.na(middle_name)) return(name) # Handle NA names
+  if (middle_name %in% duplicated_middle_namest) {
+    first_name <- words[1]
+    middle_initial <- substr(middle_name, 1, 1)
+    return(paste(first_name, " ", middle_initial, ".", sep = ""))
+  } else {
+    return(middle_name)
+  }
+})
+
+# Centrality
+degree_v <- degree(v, mode = "all")
+indegree_v <- degree(v, mode = "in")
+outdegree_v <- degree(v, mode = "out")
+betweenness_v <- betweenness(v, directed = F, weights = NA, normalized = TRUE)
+closeness_v <- closeness(v, mode = "all", weights = NA, normalized = TRUE)
+ids_v <- student$ID[match(namest, student$Name)] # Get ID from correct 'student' df
+centrality_table_v <- data.frame(
+  ID = ids_v, 
+  Name = namest, 
+  Degree = degree_v, 
+  Indegree = indegree_v,
+  Outdegree = outdegree_v, 
+  Betweenness = betweenness_v, 
+  Closeness = closeness_v
+)
+```
+
+Overview
+=======================================================================
+### Overview
+NexusLearn is an innovative dashboard that transforms classroom relationship into interactive social network visualizations. By uncovering how students connect, collaborate, and share knowledge, it helps educators identify key influencers and isolated learners at a glance. Built using R and flexdashboard, NexusLearn empowers data-driven teaching strategies that foster engagement, inclusion, and smarter group learning dynamics.
+
+***
+
+### Pipelines to build the NexusLearn
+```{r, echo=FALSE, out.width="100%", fig.align='center'}
+knitr::include_graphics("Pipelines NexusLearn.png")
+```
+
+***
+
+### Usefulness of NexusLearn
+* **Identify At-Risk Students:** Instantly see isolated nodes (students with few or no connections) and intervene early.
+
+* **Form Smarter Groups:** Use the network data to create balanced project groups, pairing isolated students with central "hub" students.
+
+* **Leverage Peer Tutors:** Identify the "unofficial" peer tutors (students with high indegree in the tutor network) and formally empower them as class mentors.
+
+General Network
+=======================================================================
+Column {data-width=500}
+-----------------------------------------------------------------------
+### Friendship Network (General)
+```{r, fig.height=8, fig.width=10, dpi=300}
+plot(g,
+     main="Friendship Network (General)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=degree_g * 0.45,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_g,
+     vertex.label.color="black",
+     vertex.label.cex=1,
+     vertex.label.font=2,
+     edge.arrow.size=0,
+     vertex.shape=gshapef,
+     vertex.color=gcolorsf)
+legend("bottomleft", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("pink", "#A2D2FF"), pt.cex=2, bty="n", title="Gender")
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+### Peer-Tutoring Network (General)
+```{r, fig.height=8, fig.width=10, dpi=300}
+plot(v,
+     main="Peer-Tutor Network (General)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=degree_v * 0.5,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_v,
+     vertex.label.color="black",
+     vertex.label.font=2,
+     vertex.label.cex=1,
+     edge.arrow.size=0,
+     vertex.shape=gshapet,
+     vertex.color=gcolorst)
+legend("bottomright", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("#E0BBE4", "#FAFAD2"), pt.cex=2, bty="n", title="Gender")
+```
+
+Degree Centrality
+=======================================================================
+Row {data-height=650}
+-----------------------------------------------------------------------
+### Friendship (by Degree)
+```{r,fig.height=8, fig.width=10, dpi=300}
+plot(g,
+     main="Friendship Network (Degree)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=degree_g * 0.5,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_g,
+     vertex.label.color="black",
+     vertex.label.font=2,
+     vertex.label.cex=1,
+     edge.arrow.size=0,
+     vertex.shape=gshapef,
+     vertex.color=gcolorsf)
+legend("bottomleft", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("pink", "#A2D2FF"), pt.cex=2, bty="n", title="Gender")
+```
+
+### Peer-Tutoring (by Degree)
+```{r,fig.height=8, fig.width=10, dpi=300}
+plot(v,
+     main="Peer-Tutor Network (Degree)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=degree_v * 0.7,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_v,
+     vertex.label.color="black",
+     vertex.label.font=2,
+     vertex.label.cex=1,
+     edge.arrow.size=0,
+     vertex.shape=gshapet,
+     vertex.color=gcolorst)
+legend("bottomright", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("#E0BBE4", "#FAFAD2"), pt.cex=2, bty="n", title="Gender")
+```
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+### Degree Scores (Friendship)
+```{r, fig.height=10}
+centrality_table_g %>%
+  select(ID, Degree) %>%
+  arrange(desc(Degree)) %>%
+  datatable(rownames = FALSE,
+            caption = "Degree Centrality (Friendship)",
+            options = list(pageLength = 21, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px"))
+```
+
+### Degree Scores (Peer-Tutoring)
+```{r, fig.height=10}
+centrality_table_v %>%
+  select(ID, Degree) %>%
+  arrange(desc(Degree)) %>%
+  datatable(rownames = FALSE,
+            caption = "Degree Centrality (Peer-Tutoring)",
+            options = list(pageLength = 21, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px"))
+```
+
+Indegree Centrality
+=======================================================================
+Row {data-height=650}
+-----------------------------------------------------------------------
+### Friendship (by Indegree)
+```{r, fig.height=8, fig.width=10, dpi=300}
+gi_size <- ifelse(indegree_g > 12, indegree_g*1, indegree_g*0.5)
+
+plot(g,
+     main="Friendship Network (Indegree)",
+     layout = layout.circle,
+     edge.curve = 0.1,
+     vertex.size = gi_size,
+     edge.width = 0.6,
+     edge.color = "grey",
+     vertex.label=ids_g,
+     vertex.label.color = "black",
+     vertex.label.font = 2,
+     vertex.label.cex = 1,
+     edge.arrow.size = 0.2,
+     edge.arrow.mode="->",
+     vertex.shape = gshapef,
+     vertex.color = gcolorsf)
+
+legend("bottomleft",
+       legend=c("Female", "Male"),
+       pch=c(22, 21),
+       pt.bg=c("pink", "#A2D2FF"),
+       pt.cex = 2,
+       bty="n",
+       title="Gender")
+```
+
+### Peer-Tutoring (by Indegree)
+```{r, fig.height=8, fig.width=10, dpi=300}
+vi_size <- ifelse(indegree_v > 8, indegree_v*1.1, indegree_v*0.7)
+
+plot(g,
+     main="Peer-Tutor Network (Indegree)",
+     layout = layout.circle,
+     edge.curve = 0.1,
+     vertex.size = vi_size,
+     edge.width = 0.6,
+     edge.color = "grey",
+     vertex.label=ids_v,
+     vertex.label.color = "black",
+     vertex.label.font = 2,
+     vertex.label.cex = 1,
+     edge.arrow.size = 0.2,
+     edge.arrow.mode="->",
+     vertex.shape = gshapet,
+     vertex.color = gcolorst)
+
+legend("bottomleft",
+       legend=c("Female", "Male"),
+       pch=c(22, 21),
+       pt.bg=c("#E0BBE4", "#FAFAD2"),
+       pt.cex=2,
+       bty="n",
+       title="Gender")
+```
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+### Indegree Scores (Friendship)
+```{r}
+centrality_table_g %>%
+  select(ID, Indegree) %>%
+  arrange(desc(Indegree)) %>%
+  datatable(rownames = FALSE,
+            caption = "Indegree Centrality (Friendship)",
+            options = list(pageLength = 16, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px"))
+```
+
+### Indegree Scores (Peer-Tutoring)
+```{r}
+centrality_table_v %>%
+  select(ID, Indegree) %>%
+  arrange(desc(Indegree)) %>%
+  datatable(rownames = FALSE,
+            caption = "Indegree Centrality (Peer-Tutoring)",
+            options = list(pageLength = 16, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'ltipr',
+                           scrollY = "350px"))
+```
+
+Outdegree Centrality
+=======================================================================
+Row {data-height=650}
+-----------------------------------------------------------------------
+### Friendship (by Outdegree)
+```{r, fig.height=8, fig.width=10, dpi=300}
+go_size <- ifelse(outdegree_g >= 10, outdegree_g*1.2, outdegree_g*0.6)
+
+plot(g,
+     main="Friendship Network (Outdegree)",
+     layout = layout.circle,
+     edge.curve = 0.1,
+     vertex.size = go_size,
+     edge.width = 0.6,
+     vertex.label=ids_g,
+     edge.color = "grey",
+     vertex.label.color = "black",
+     vertex.label.font = 2,
+     vertex.label.cex = 1,
+     edge.arrow.size = 0.2,
+     edge.arrow.mode="<-",
+     vertex.shape = gshapef,
+     vertex.color = gcolorsf)
+
+legend("bottomleft",
+       legend=c("Female", "Male"),
+       pch=c(22, 21),
+       pt.bg=c("pink", "#A2D2FF"),
+       pt.cex = 2,
+       bty="n",
+       title="Gender")
+```
+
+### Peer-Tutoring (by Outdegree)
+```{r, fig.height=8, fig.width=10, dpi=300}
+vo_size <- ifelse(outdegree_v > 9, outdegree_v*1.1, outdegree_v*0.7)
+
+plot(g,
+     main="Peer-Tutor Network (Outdegree)",
+     layout = layout.circle,
+     edge.curve = 0.1,
+     vertex.size = vo_size,
+     edge.width = 0.6,
+     edge.color = "grey",
+     vertex.label=ids_v,
+     vertex.label.color = "black",
+     vertex.label.font = 2,
+     vertex.label.cex = 1,
+     edge.arrow.size = 0.2,
+     edge.arrow.mode="<-",
+     vertex.shape = gshapet,
+     vertex.color = gcolorst)
+
+legend("bottomleft",
+       legend=c("Female", "Male"),
+       pch=c(22, 21),
+       pt.bg=c("#E0BBE4", "#FAFAD2"),
+       pt.cex=2,
+       bty="n",
+       title="Gender")
+```
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### Outdegree Scores (Friendship)
+```{r}
+centrality_table_g %>%
+  select(ID, Outdegree) %>%
+  arrange(desc(Outdegree)) %>%
+  datatable(rownames = FALSE,
+            caption = "Outdegree Centrality (Friendship)",
+            options = list(pageLength = 16, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px"))
+```
+
+### Outdegree Scores (Peer-Tutoring)
+```{r}
+centrality_table_v %>%
+  select(ID, Outdegree) %>%
+  arrange(desc(Outdegree)) %>%
+  datatable(rownames = FALSE,
+            caption = "Outdegree Centrality (Peer-Tutoring)",
+            options = list(pageLength = 16, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px"))
+```
+
+Betweenness Centrality
+=======================================================================
+Row {data-height=650}
+-----------------------------------------------------------------------
+### Friendship (by Betweenness)
+```{r, fig.height=8, fig.width=10, dpi=300}
+plot(g,
+     main="Friendship Network (Betweenness)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=betweenness_g * 90,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_g,
+     vertex.label.color="black",
+     vertex.label.cex=1,
+     vertex.label.font=2,
+     edge.arrow.size=0.1,
+     vertex.shape=gshapef,
+     vertex.color=gcolorsf)
+legend("bottomleft", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("pink", "#A2D2FF"), pt.cex=2, bty="n", title="Gender")
+```
+
+### Peer-Tutoring (by Betweenness)
+```{r, fig.height=8, fig.width=10, dpi=300}
+plot(v,
+     main="Peer-Tutor Network (Betweenness)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=betweenness_v * 100,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_v,
+     vertex.label.color="black",
+     vertex.label.cex=1,
+     vertex.label.font=2,
+     edge.arrow.size=0.2,
+     edge.arrow.mode="->",
+     vertex.shape=gshapet,
+     vertex.color=gcolorst)
+legend("bottomleft", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("#E0BBE4", "#FAFAD2"), pt.cex=2, bty="n", title="Gender")
+```
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+### Betweenness Scores (Friendship)
+```{r}
+centrality_table_g %>%
+  select(ID, Betweenness) %>%
+  arrange(desc(Betweenness)) %>%
+  datatable(rownames = FALSE,
+            caption = "Betweenness Centrality (Friendship)",
+            options = list(pageLength = 16, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px")) %>%
+  formatRound('Betweenness', 4)
+```
+
+### Betweenness Scores (Peer-Tutoring)
+```{r}
+centrality_table_v %>%
+  select(ID, Betweenness) %>%
+  arrange(desc(Betweenness)) %>%
+  datatable(rownames = FALSE,
+            caption = "Betweenness Centrality (Peer-Tutoring)",
+            options = list(pageLength = 16, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px")) %>%
+  formatRound('Betweenness', 4)
+```
+
+Closeness Centrality
+=======================================================================
+Row {data-height=600}
+-----------------------------------------------------------------------
+### Friendship (by Closeness)
+```{r, fig.height=8, fig.width=10, dpi=300}
+plot(g,
+     main="Friendship Network (Closeness)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=closeness_g * 700,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_g,
+     vertex.label.color="black",
+     vertex.label.cex=1,
+     vertex.label.font=2,
+     edge.arrow.size=0.2,
+     vertex.shape=gshapef,
+     vertex.color=gcolorsf)
+legend("bottomleft", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("pink", "#A2D2FF"), pt.cex=2, bty="n", title="Gender")
+```
+
+### Peer-Tutoring (by Closeness)
+```{r, fig.height=8, fig.width=10, dpi=300}
+plot(v,
+     main="Peer-Tutor Network (Closeness)",
+     layout=layout_nicely,
+     edge.curve=0.5,
+     vertex.size=closeness_v * 700,
+     edge.width=0.6,
+     edge.color="grey",
+     vertex.label=ids_v,
+     vertex.label.color="black",
+     vertex.label.cex=1,
+     vertex.label.font=2,
+     edge.arrow.size=0.2,
+     vertex.shape=gshapet,
+     vertex.color=gcolorst)
+legend("bottomleft", legend=c("Female", "Male"), pch=c(22, 21),
+       pt.bg=c("#E0BBE4", "#FAFAD2"), pt.cex=2, bty="n", title="Gender")
+```
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+### Closeness Scores (Friendship)
+```{r}
+centrality_table_g %>%
+  select(ID, Closeness) %>%
+  arrange(desc(Closeness)) %>%
+  datatable(rownames = FALSE,
+            caption = "Closeness Centrality (Friendship)",
+            options = list(pageLength = 17, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px")) %>%
+  formatRound('Closeness', 4)
+```
+
+### Closeness Scores (Peer-Tutoring)
+```{r}
+centrality_table_v %>%
+  select(ID, Closeness) %>%
+  arrange(desc(Closeness)) %>%
+  datatable(rownames = FALSE,
+            caption = "Closeness Centrality (Peer-Tutoring)",
+            options = list(pageLength = 17, 
+                           lengthMenu = c(5, 10, 15, 20, 25, 30, 40, 50, -1),
+                           dom = 'lftipr',
+                           scrollY = "350px")) %>%
+  formatRound('Closeness', 4)
+```
